@@ -1,0 +1,472 @@
+---
+title: |
+       | Calculating and interpolating the T-100 year 
+       | rainfall event in Austria
+subtitle: |
+          | Final Seminary Work 
+          | Statistics of Extreme Events and Geostatistics
+author: "Gauthier Heroufosse, Valentino Mascherini"
+date: "`r Sys.Date()`"
+output: 
+  bookdown::pdf_document2: 
+    number_sections: yes
+    toc: TRUE
+bibliography: SF_bibl.bib
+header-includes:
+  \usepackage{float}
+  \floatplacement{figure}{H}
+  \usepackage{caption}
+  \usepackage{subcaption}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.width = 10, fig.height = 5)
+```
+
+```{r libs, include=F, warning=F, message=F}
+
+library(knitr)
+library(ggplot2)
+library(readr)
+library(kableExtra)
+library(dplyr)
+library(sf)
+library(cowplot)
+library(magick)
+
+setwd("C://Users//valen//Documents//Freiburg//BOKU//WT23//ExEv//Extreme_Events//Seminary_final")
+
+
+```
+
+```{r, include=F, message = F}
+
+map_histalp <- read_csv("map_stats_rain.csv")
+stats_histalp <- read_csv("stats_rain_clean.csv")
+stats_rain_all <- read_csv("stats_rain_tot.csv")
+
+stats_rain_all$count <- 54
+
+```
+
+\newpage
+
+# Introduction
+
+Extreme value theory is surely one of the most influential statistical branches of the last decades and the upcoming future. Its applications range from finance markets to earthquake, and all have in common the characteristic of dealing with scarce, extreme data. The very nature of such values implies a magnification in the scale of the processes, that can only be achieved by extrapolation, using asymptotic arguments.
+In the field of meteoric phenomena, it is even a bigger challenge to predict accurately the return levels of high magnitude, due to climate change. Therefore, the more robust methods and approaches to tackle said issues have to be identified and tried out, in order to improve the chances at the scientist's disposal. \newline
+This study strives to add another piece to the extreme value theory puzzle, applied to climate science. The variable of interest is precipitation, arguably one of the most important characteristics of the weather, as it affects agriculture by direct rainfall and through balancing water reservoirs, and it constitutes a possible hazard as well to people, settlements and infrastructures. After all, extreme value theory had been originally applied to civil engineering, to build emergency defiant structures. \newline
+In this research, it has been compared which method of extreme value selection is more suitable for precipitation time series. Within that, a benchmarking of parameter estimation techniques, such as maximum likelihood estimation and L-moments, took place. Moreover, two different, novel threshold selection approaches have also been employed with the scope of gaining more understanding in regard of their applicability and individual performance. The assessment of the aforementioned methods has been carried out through algebraic and visual measures, both at model level and at method level. Given the data of  various rainfall measuring stations, the most appropriate model has been detected, and a count of the success over the others has been recorded to select the best one through the entire region. Through additional data, recording the years following the first dataset, an additional comparison has been performed in order to quantify the predictions previously obtained. Furthermore, through geospatial interpolation techniques, the predictions have been extended to the whole territory and visually compared to the second dataset. \newline
+Thus, the scope of this study is to discuss which methods better suit extreme rainfall event modeling through model selection and validation techniques. \newline
+Please find all code and additional figures and tables in the Appendix.
+
+# Data set description 
+
+<!-- (including descriptive statistics) -->
+
+```{r, include = F, warning=F, message=F}
+# get polygon of Austria
+load("austria_map.RData")
+# get points of HISTALP
+
+stat_name <- read.csv("station_names_loc.csv")
+
+histalp <- st_as_sf(stat_name, coords = c("long", "lat"), crs = 4326)
+```
+
+## HISTALP
+
+
+The Historical Instrumental Climatological Surface Time Series Of The Greater Alpine Region (HISTALP) data set comprises over 200 stations spread over the so called Greater Alpine Region, ranging from 4 to 19°E, and from 43 to 49°N. The territory covered thus comprises many different countries, but in this research only the Austrian region has been selected, the reason being that it is the only one with access to daily data. The time series, for most stations, start from 1950 and end in 2009, and mainly record precipitation and temperature. It has to be noted how the data are homogenised through a QC procedure, and many non-climatic breaks and outliers have been removed [@auer2007histalp]. After the selection of the stations befitting the purpose of this study, only 54 remained to be analysed, a few of which presenting data gaps up to 1 - 2 year of length. The map of the area of interest is shown in Figure \ref{fig:g0}. It was expected that the estimation of the T-100 event level would be affected by such gaps, but the biggest problem lies in the limited number of stations to perform the kriging procedure on. Table \ref{tab:stats} shows the main descriptive statistics for the data set, and in the Appendix another table with the single station statistics can be found.
+
+```{r, echo = F}
+
+kable(round(stats_rain_all,3), caption = "Descriptive statistics of the entire HISTALP dataset.", label = "stats")%>%
+  kable_styling(latex_options = "HOLD_position")
+
+
+```
+
+```{r g0, echo = F, warning=F, message=F, fig.cap= "Map of the 54 HISTALP stations in Austria selected for the research. There are some stations that are quite close to each other, while leaving some areas bare, like in the region of Vienna.", out.width="80%", fig.align='center'}
+
+ggplot(st_geometry(at)) +
+  geom_sf() +
+  geom_sf(data =(st_geometry(histalp)), color = "red") +
+  theme_light() +
+  xlab("Longitude") +
+  ylab("Latitude")
+  
+```
+
+
+
+
+## E-OBS
+
+The E-OBS is an ensemble data set that stems from the stations of the ECA&D initiative and contains a number of climatic variables like precipitation, temperature, sea level pressure for Europe [@cornes2018ensemble]. It has to be taken into account that the data presented are in fact spatially interpolated in form of a grid. The dataset is sparse and the possible presence of outliers can produce unrealistic values where just few stations are near, which is usually at the borders of the dataset. Since the region the study is focused in is Austria, it is to be expected to have a robust estimation of such data, even considering that precipitation is more sensible to that issue than other variables [@morice2012quantifying]. A plot of such dataset is shown in figure \ref{fig:t13o}.
+
+# Methodological approach 
+
+<!-- (please give a short and concise summary of the methods that you use with some general background - this covers the “theory part” of the regular exam, so please put some efforts into this task.  -->
+<!-- This section needs to cover (and should be structured along) the two individual models and your assessment method used for model comparison. -->
+
+Hydrology is supported by statistical tools in a variety of ways, and that is also true for the field of extreme events. Extreme value theory is underlying to calculations such as the T-100 year events, and is based upon probability distribution models [@bras1993random]. Those are fit to the subset of data that is obtained after an extreme value selection. Here are discussed the methods employed in this study. The implementation of those methods is automated by the script that can be found in the Appendix.
+
+## Extreme value selection
+
+### Annual maxima
+
+This method is the most common of the block maxima approach, which selects the maximum value among $n$ observations within a time period, which is described by a so called "block". This means that there is no need for declustering the data, but at the same time a significant portion of them is lost. 
+The generalised extreme value distribution (GEV) based on @fisher1928limiting is considered to be a good fit for it, and its cumulative distribution function (CDF) is thus described:
+
+\begin{equation}
+e^{-t(x)}
+\end{equation}
+
+where
+
+\begin{equation}
+  t(x) = \begin{cases} \big(1 + \xi( \frac{x - \mu}\sigma)\big)^{-{1}/\xi} \ \ \xi \ne  0 \\ e^{-(x - \mu)/\sigma} \ \ \ \ \ \ \ \ \ \ \ \ \xi = 0 \end{cases}
+\end{equation}
+
+with $\mu$ as the location parameter, $\sigma$ > 0 as the scale parameter and $\xi$ as the shape parameter.
+
+Based on $\xi$ we differentiate the GEV into three families: Gumbel, Weibull, Frechet. In our case, the Gumbel distribution is the more appropriate, since it is not limited by an upper boundary. At any rate, there is no need of subjectively choose between those three options a priori, as through inference on $\xi$, the data themselves determine the most appropriate type of tail behavior [@coles2001introduction].
+
+
+
+### Peak over threshold
+
+Contrary to the annual maxima, the method of POT cannot be implemented with ease. The question of threshold selection is one that is unsolved to this day, and there are many different approaches to tackle it [@caeiro2015threshold], without a definitive best method. Mean excess and parameter stability plots have been deemed scarcely interpretable [@wadsworth2016exploiting] and more objective methods have been developed. Those are also able to be automised without the necessity of visualising plots. \newline
+The subset of data obtained by the threshold selection is then fit with a general Pareto distribution (GPD), whose CDF is so defined:
+
+\begin{equation}
+  F(z) = \begin{cases} 1-( 1 + \xi z)^{-{1}/\xi} \ \ \xi \ne 0 \\ 1-exp(-z) \ \ \ \ \ \ \ \xi = 0 \end{cases}
+\end{equation}
+
+
+where
+
+
+\begin{equation}
+z = \frac{x - \mu}\sigma
+\end{equation}
+
+with $\mu$ as the location parameter, $\sigma$ > 0 as the scale parameter and $\xi$ as the shape parameter.
+
+As in the case of the GEV, the GPD is most influenced by the shape parameter. The scale parameter is the one that is determined by the threshold selection [@coles2001introduction].
+The advantage of using POT is most notably the increase of available observations to fit the model with, with the trade-off of increasing subjectivity bias due to the threshold selection. In the case of this study, even if the threshold is automatically selected, upper and lower limits for it have been decided upon. More in the Appendix section.
+
+## Parameter estimation
+
+### Maximum Likelihood Estimation
+
+A few different methods exist to estimate the parameters of a distribution. One of the most common in the Maximum Likelihood method. If we take a GEV distribution as an example; the basic idea is to find the parameters $\hat{\theta}$ from the GEV (where $\theta$ = {$\mu$ = location; $\sigma$ = scale; $\alpha$ = shape} that maximize the probability of the observed data given the parameters. This probability is known as the likelihood.
+We first need to define the likelihood function that describes the probabilities of the observed data given the parameters values :
+
+$L(\theta) = \prod{f(x_{i}}; \theta)$
+
+Then, an algorithm is used to maximise the Likelihood function, with a given $\hat{\theta}$ that is the best estimator of the $\theta$ set of parameters.
+
+### L-moments
+
+The L-moment method is another method to estimate the parameters of a distribution. It is based on the first four linear moments $\lambda_{1}$ to $\lambda_{4}$ that are defined as: 
+
+$\lambda_{1} = \mathbb{E}(X_{(1:1)})$ 
+
+$\lambda_{2} = \frac{1}{2} \mathbb{E}(X_{(2:2)} - X_{(1:2)})$  
+
+$\lambda_{3} = \frac{1}{3} \mathbb{E}(X_{(3:3)} - X_{(2:3)}  + X_{(1:3)})$ 
+
+$\lambda_{4}  = \frac{1}{4} \mathbb{E}(X_{(4:4)} - 3X_{(3:4)}  + 3X_{(2:4)} - X_{(1:4)})$
+
+Once the sample L-moments are computed, the parameters of the distribution (GEV, GPD) are estimated by solving a set of equations that are derived from the relation between the L-moments and those parameters  [@hosking1993some; @huard2010bayesian]. \newline
+It is also common to standardize moments of higher order to make them independent from the lower moment: 
+
+L-coefficient of variation : $\tau_{1}$ = $\lambda_{2}$/$\lambda_{1}$
+
+L-skewness : $\tau_{3}$ = $\lambda_{3}$/$\lambda_{2}$
+
+L-kurtosis : $\tau_{4}$ = $\lambda_{4}$/$\lambda_{3}$
+
+## Assessment methods
+
+Model selection is another somewhat problematic step in the process. Visual interpretation is unreliable and not applicable in case of large datasets, thus two indicators of model assessment have been implemented following the paper of @schlogl2017extreme. Those are the CRMSE and the CMAE, conditional variants of the root mean square error and the mean absolute error (Weibull, 1939; Makkonen, 2006), and are so described:
+
+\begin{equation}
+  CRMSE_{T*} =  \sqrt\frac{{\sum_{i = 1}^n (\hat{y}_{i} - y_{i})^2}}{n_{T*}} \ \ \forall \ \ {y}_{i} : \bigg[- \frac{1}{ln(\frac{m}{N+1})} \bigg] \ge T^*
+\end{equation}
+
+\begin{equation}
+  CMAE_{T*} =  \frac{{\sum_{i = 1}^n |(\hat{y}_{i} - y_{i})}|}{n_{T*}} \ \ \forall \ \ {y}_{i} : \bigg[- \frac{1}{ln(\frac{m}{N+1})} \bigg] \ge T^*
+\end{equation}
+
+where $\hat{y}_{i}$ is the model prediction and $y_{i}$ is the observed value. $N$ and $m$ are statistical rankings, $m$ being the minimum and $N$ the maximum. $n_{T*}$ is the number of the elements that are above the threshold $T^*$. \newline
+The main issue with those indicators is that they both carry some subjective bias, as a return period ($T^*$) has to be selected in order to calculate them. A $T^*$ = 5 has been selected since the dataset cover about 50 years. Thus, the observations to be employed have been reduced to a dozen, in most cases. In this research the CRMSE$_{5}$ and CMAE$_{5}$ are employed to compare the HISTALP observations with the model fits for every method. \newline
+
+Another model assessment approach has been implemented, that considers all the available stations.
+Comparing the T-13 return level to the data from the E-OBS data set, it is possible to assess how the models have performed in predicting the events that have been occourring from 2010 to the end 2022, that is the period that isn't covered by the HISTALP dataset. To do so, firstly it is each E-OBS tile that covers each HISTALP station is located , obtaining its maximum value, then compared to the T-13 return level.
+
+## Geostatistical analysis 
+
+### Boxcox transformation
+
+As the resulting T-100 was not normal, a boxcox transformation was used to make the data normal, in order to realize a kriging afterwards. The technique involves a power transformation of the form :
+
+
+\begin{equation}
+y = \frac{(x^{\lambda}-1)}{\lambda} \ \ \text{for} \ \lambda \neq 0
+\end{equation}
+
+and 
+
+\begin{equation}
+y = \log{x} \ \ \text{for} \ \lambda = 0
+\end{equation}
+
+where x is the original data and y is the transformed data. The value of $\lambda$ is chosen such that the transformed data is as close to normal as possible. \\
+
+
+Moreover, as the *eyefit* function used to fit the variogram doesn't let the user choose all the parameters when using a boxcox transformation with a $\lambda$ < 0, a comparison between the results with the optimal value of $\lambda$ and with $\lambda = 0$ will be done. 
+
+### Kriging
+
+The chosen method to realize the geographical interpolation is the ordinary kriging. The kriging method is an interpolation method that is based on the spatial correlation between measurements. The semivariogram is first computed to express the dissimilarity of the two points in regards to the distance h for the whole dataset :
+
+
+$$\gamma =  \frac{( z(x+h) - z(h))^2}{2}$$
+
+Based on that , you estimate the best function $\gamma(h)$  that can represent the covariance of the points depending on the distance h. The variogram model used in our simulation is defined as follow :
+
+$$\gamma(h)  = b_0*nug(h)  +  b_1*exp(h,a_1)$$
+
+The weights are then calculated to minimise the variance estimation. 
+We end up with the Best Linear Unbiased Estimator (BLUE). The prediction is also exact as $Z^*(x_o)=Z(x_{\alpha})\; \; \text{if} \; \; x_o=x_{\alpha}$.
+
+The kriging requires a 2nd-order stationary in order to be performed. That means that the mean is constant on the study field and the covariance depends only on the distance. 
+
+
+### Validation
+
+
+
+In order to validate the results, a comparison with real precipitation data will be done using data from the E-OBS dataset.
+From this dataset, only the years from 2010 to 2022 have been selected and the maximum values have been extracted. Thus, the subset of data can be used to perform model validation for the extreme value series models, by comparing it to the T-13 year event.
+
+
+## Software and packages
+
+This research has been carried out using *R* version 4.0 via *RStudio* [@R] and specific packages to perform statistics.
+The *extRemes* package [@extremes] is used to perform extreme value analysis, the model fitting is done by the *fevd* function, which supports the many EV distributions, with the GEV and GPD used in this study as well. Thresholds and preferred parameter estimation methods can be selected when fitting the model. In the Appendix the fitting of the models is shown. To estimate L-moments the *lmom* package [@lmom] and the *lmomco* [@lmomco] were employed, in the first POT threshold selection method.
+
+To perform the geostatistical analysis, the package *geoR* was used. The fitting of the variogram was done using the *eyefit* function, used as its name suggest, to fit an empirical variogram "by eye". Then, the kriging was realised using the *krige.conv* function. 
+A few other geo-related packages were used to preprocess the data, such as *MASS*, *Raster* or *sf*.
+
+# Results
+
+
+## Method comparison
+
+Due to the CRMSE$_{5}$ and CMAE$_{5}$, findings can presented in regard to which method is the best according to those two indicators. The Table \ref{tab:comp} shows that the best overall method seems to be the GPD/POT-WAD/MLE with the threshold selection performed by the script developed by @wadsworth2016exploiting, with 23% of success which is slightly more than the 20% of the GEV/AM/lmom and GPD/POT/MLE. For CRMSE$_{5}$, GPD/POT/MLE with threshold selection via L-moments [@silva2020moments] is the best by far with 26% of success rate, while for CMAE$_{5}$ the second approach dominates with 31% in the GPD/POT-WAD/MLE. Figure \ref{fig:g1} is an example of how the different models compare to each other. For simplicity, the methods will be called from now on AM, POT and POT-WAD respectively.\newline
+As for the T-13 return level comparison, every model has a mean of about 17-18% of difference with the data from E-OBS. Table \ref{tab:eobs} shows the sum of absolute errors for each model. Moreover, 28% of the times the actual rainfall exceeded the simulated one, in 11% by 10 mm or more with a maximum of 27 mm or 26% of the observed value. The result confirm what @schlogl2017extreme reported in regard to the fact that POT techniques tend to overestimate the return levels when dealing with non extreme events, with low return period. 
+
+```{r, include = F}
+load("RMSE_comp.RData")
+load("MAE_comp.RData")
+load("plot_comp.RData")
+
+load("method_comparison.RData")
+load("plot_elements.RData")
+
+load("thresh.Rdata")
+
+load("eobs_0.1.RData")
+
+t4 <- read.csv("short_not_MAE.csv")
+
+t1 <- round(best_m_rmse)
+
+t2 <- round(best_m)
+
+t3 <- best_tot
+
+colnames(t1) <- c("MLE", "Lmom", "Sum")
+colnames(t2) <- c("MLE", "Lmom", "Sum")
+
+colnames(t4) <- c(" ", "MLE", "Lmom")
+
+
+```
+
+
+```{r, echo =F}
+
+kable(list(t1,t2), label = "comp", caption = "Comparison between the methods used to obtain the T-100 level. The first table reports the success percentage in regard to the CRMSE, the second one to the CMAE. POT indicates the GPD/POT method with threshold selection using L-moments, POT-WAD using MLE, according to the methods included in the Appendix section 3.")%>%
+  kable_styling(latex_options = "HOLD_position")
+
+```
+
+```{r, echo = F}
+
+kable(t3, label = "compf", caption ="Table showing the total success percentage among the CRMSE and CMAE.")%>%
+  kable_styling(latex_options = "HOLD_position")
+
+```
+
+
+```{r compr, include = F}
+sum1 <- summary(as.numeric(thresh_comp[,1]))
+sum2 <- summary(as.numeric(thresh_comp[,2]))
+
+sumt <- rbind(sum1, sum2)
+
+rownames(sumt) <- c("MLE selection", "Lmom selection")
+
+```
+
+```{r thresh, echo = F}
+kable(sumt, label = "thresh", caption = "Summary statistics of the thresholds obtained through the two different methods described in section 3 of the Appendix. The ones obtained with MLE are lower overall, and do not present unreasonble maxima. It is not to be confused the step of threshold selection (MLE or Lmom) with the one of model parameter estimation, which uses the same mathematical approaches.")%>%
+  kable_styling(latex_options = "HOLD_position")
+
+```
+
+
+```{r g1, echo=F, warning=F, message = F,fig.cap="Plot of the station 46 Reichenau Rax showing a comparison of the methods employed. In this case both the CRMSE and CMAE are lowest with the POT-WAD method, and its MLE and Lmom models yield the same result, overlapping.", warning=F, message=F, fig.align='center'}
+
+g1 + scale_x_continuous("Return Period [y]",breaks = c(0, log(5),log(10),  log(100),log(500)), labels = c(0, 5, 10, 100, 500), limits = c(0,log(500))) +
+  theme(legend.position = c(0.1, 0.8), 
+        legend.box.background = element_rect(color="black", size=2)) 
+
+
+```
+
+```{r t4, echo=F}
+
+kable(t4, label = "eobs", caption = "Comparison between the methods used to obtain the T-13 level with the eOBS data set maximum values from year 2010 to 2022. The indicator used is the sum of absolute errors, which doesn't show a great deal of difference but still validates what has been proposed in previous papers.")%>%
+  kable_styling(latex_options = "HOLD_position")
+
+```
+
+```{r eobs0, include=F, eval=F,warning=F,message = F, fig.cap="Plot of the E-OBS dataset with a grid resolution of 0.1 degrees. The maximum rainfall event occourred from the start of 2010 to the end of 2022 is represented. This is used to have a visual comparison with the kriging result plot (Figure 4), which represents the T-13 event."}
+ggplot() +
+  geom_tile(data=df_rain_masked, aes(x=longitude, y=latitude, fill=value)) +
+  scale_fill_viridis_c(option = "mako", name = "Max rainfall event", na.value = 'white', direction=-1) +
+  coord_equal() +
+  xlab("Longitude") + ylab("Latitude") +
+  geom_sf(data = at, size = 1, shape = 23, inherit.aes = FALSE, fill = NA) + theme_light() +
+  guides(fill = guide_colorbar(order = 1), color = guide_legend(order = 2)) +
+  theme(legend.position = c(0.1, 0.8), 
+        legend.box.background = element_rect(color="black", size=2)) 
+
+```
+
+
+## Geostatistical analysis
+
+The results suggest that the POT with the Maximum Likelihood method perform globally better than all the other combinations. Thus, all the geostatistical analysis was done using the return period resulting from this statistical approach.
+
+### Statistical distribution and transformations
+
+It is clear that the initial T-100 rain event data set is particularly not normal. Some stations present extreme T-100 rain events that drive the distribution on the right. After a logarithmic transformation, the phenomenon is attenuated, but still present. The optimal boxcox transformation result in a much more centered data set, with almost all the values in the qqplot confidence interval. Regarding the geographical distribution, the optimal fitting of the variogram using $\lambda=0$ resulted in the parameters seen in \ref{tab:geopar}.
+
+```{r, echo=F, include = F, eval =F, warning=F, fig.align = 'center', fig.cap="Statistical distribution of the dataset", out.width='70%', warning=F, message=F}
+knitr::include_graphics("imgs//qqplot.png")
+```
+
+
+
+```{r geopar, echo=F}
+vario.fit <- data.frame(Model = "exponential",
+                        Sill = 0.062,
+                        Phi = 0.61,
+                        Nugget = 0.0077,
+                        PracticalRange = 1.83)
+
+knitr::kable(vario.fit, label= "geopar",caption = "Type and parameters of fitted variogram.")
+```
+
+
+### Kriging results
+
+
+```{r k0, echo=F, warning=F, fig.align = 'center', fig.cap="T-100 rain event kriging map", out.width='80%', warning=F, message=F}
+knitr::include_graphics("imgs//krigLambda0.png")
+```
+
+The kriging result gives a relatively non-homogeneous distribution over the country. It is observable that all the East part of Austria is spared from rain in compare to the central part. There is also a hole in the middle of the Tirol region. The second result with the optimal lambda is not displayed here as there is not noticeable difference between the two plots.
+
+
+
+```{r variance, echo=F, warning=F, fig.align = 'center', fig.cap="Variance of the T-100 rain event kriging map", out.width='80%', warning=F, message=F}
+knitr::include_graphics("imgs//krigVar0.png")
+```
+
+You can find here above the variance corresponding to the prediction.
+
+### Comparison with real rain data
+
+```{r eobs1, echo=F, eval = F, fig.cap="Comparison of T-13 year event. Map A on shows the results of kriging the T-13 return level, while map B represents the maximum value that the E-OBS ensemble database has registered for the years 2010-2022."}
+ggdraw() + 
+  draw_image("imgs//rainEvent_a.png", width = 0.49) + 
+  draw_image("imgs//t13rainEvent_b.png", width = 0.49, x = 0.5
+             )
+
+```
+
+
+\begin{figure}
+\centering
+\begin{subfigure}{.5\textwidth}
+  \centering
+  \includegraphics[width=1\linewidth]{imgs//rainEvent.png}
+  \caption{E-OBS max for 2010-2022}
+  \label{fig:t13o}
+\end{subfigure}%
+\begin{subfigure}{.5\textwidth}
+  \centering
+  \includegraphics[width=1\linewidth]{imgs//t13rainEvent.png}
+  \caption{T-13 return level kriging}
+  \label{fig:t13k}
+\end{subfigure}
+\caption{Comparison of T-13 year event. Map A on shows the results of kriging the T-13 return level, while map B represents the maximum value that the E-OBS ensemble database has registered for the years 2010-2022.}
+\label{fig:eobs1}
+\end{figure}
+
+<!-- ![Comparison of T-13 year event. The map on the right represents the maximum value that the E-OBS ensemble databse has registered for the years 2010-2022.](imgs//rainEvent.png) {width = 10%}![](imgs//t13rainEvent.png){width = 10%} -->
+
+
+The prediction behaves not quite the same as the true data is. That is not that surprising, as the prediction is only a theoretical statement. However, the higher data values are still relatively close to the predicted ones. The biggest difference is seen in the middle of the austrian territory. We clearly see there that the rain values are overestimated. 
+
+
+
+# Discussion
+
+This research can confirm the results of @ben2009rainfall and @bezak2014comparison stating that the GPD/POT is a better method than AM when modeling extreme rainfall values. On the other hand, in regard to which technique of threshold selection is best, the results, which are reported in Table \ref{tab:comp} and \ref{tab:compf} and are not conclusive. It is interesting to see how POT-WAD, the worse performing method in CRMSE$_{5}$, is able to result the overall best due to the CMAE$_{5}$ success rate.
+Taking into consideration the nature of the RMSE and the MAE is the way to get a deeper understanding of the results. In general, MAE doesn't react to variation in noise as much as the RMSE. That means that if the error is distributed or concentrated in a single data point, it doesn't matter as much. RMSE registers more sensibly when a single observation is very skewed and penalizes it more than when the same error spread among the whole sample. \newline 
+The POT-WAD has been seen selecting lower thresholds (Table \ref{tab:thresh}), with the result of selecting more data points than the POT. That could make it so that it has an overall lower error (CMAE), since it has to accommodate more data points. On the other hand, those few, noise-imbued points carry the most of the unexplained variance, so much that the POT-WAD is the worse in the CRMSE$_{5}$success rate. From this reasoning we can infer that the POT-WAD gives less space to the more noise-imbued points than the other two models, while the POT and the AM get skewed at the expense of the fit of the regular points. That is indeed the effect of employing a larger sample size in modeling. 
+In the graph of Figure \ref{fig:g0} one of the stations with lowest CRMSE$_{5}$ and CMAE$_{5}$ for the POT-WAD method can be seen. The GEV/AM is shown to be really weak in the body of this distribution, but to recover quite well in case of the AM/MLE. \newline
+Going back to threshold selection methods, in table \ref{tab:thresh} the difference between the thresholds do not appear too marked. However, it has to be taken into account how even a single mm of rainfall more can exclude hundreds of observations. The two automatic threshold selecting methods seem to converge to the same results, at least regarding the lower values, showing the robustness of the methods. Still, the L-moments based selection has some clear issues, that make the best threshold approach the upper limit, as in the case of the Schockl station where the threshold value is as high as 59 mm.
+
+The kriging prediction resulting from the geostatistical analysis gives a 
+good view of how could be represented the extreme rain event on the country. However, it is important to keep in mind that this prediction is heavily subject to random effects that are unpredictable. Looking at the variance resulting from the kriging, we see that the whole region of interest is under a high variance. Even when the variance is minimal (250 mm$^2$), the resulting deviation could be up to 15 mm of rain difference.
+Unfortunatly, the variance couldn't be achieved using the optimal lambda from the boxcox transformation using the *geoR* package. It seems to have some troubles dealing with lambda values < 0. A good alternative could be to use the *gstat* package.
+
+
+Regarding the comparison with the E-OBS dataset, for the POT-WAD model in the majority of the cases there has been an overestimation of the T-13 return level event (72%) with the maximum error being 51 mm or 37%. The POT and AM have performed similarly with the exception of an outlier which puts the maximum percentage error of AM at 82%. It has to be noted how that station is the one that lacks the most data points, missing entire years. That surely affects the AM more negatively than the POT methods. Nonetheless, AM has been proven to be the most accurate as seen in Table \ref{tab:eobs}. Another comparison, this time a visual one, is made between the E-OBS ensemble dataset and the results of the kriging procedure using the T-13 return level values obtained through the POT-WAD method. The plots concerned are shown in figure \ref{fig:eobs1} and show the differences between the two. It seems that the area that has the most variance as seen in \ref{fig:variance} is also the one that differs the most between the two maps (Figure \ref{fig:eobs1}). Not coincidentally, it is an area lacking measurement stations. Notably, at coordinates 48° N, 17° E, there is a dark blue spot in the E-OBS map that is lacking in the kriging. That also has to do with the lack of measurement stations nearby and being at the edge of the domain. Anyway, here is a reminder that the E-OBS dataset itself is not comprised of observed data, but rather of interpolated ones, that are thus subjected to errors of various nature and should not be considered substitutes to genuinely observed rainfall.
+
+
+\newpage
+
+
+
+
+
+
+
+
+
+
+
+# References
+
+
